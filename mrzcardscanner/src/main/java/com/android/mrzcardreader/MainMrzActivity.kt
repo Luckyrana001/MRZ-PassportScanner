@@ -6,6 +6,8 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.android.mrzcardreader.camera.MrzCameraManager
 import com.android.mrzcardreader.camera.models.IdData
 import com.android.mrzcardscanner.databinding.ActivityMrzBinding
@@ -18,8 +20,10 @@ class MainMrzActivity : AppCompatActivity(), CardResult {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configureEdgeToEdge(lightSystemBars = false)
         viewBinding = ActivityMrzBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
+        applyScannerInsets()
         initializeCamera()
         if (allPermissionsGranted()) {
             startCamera()
@@ -27,6 +31,36 @@ class MainMrzActivity : AppCompatActivity(), CardResult {
             requestPermissions(REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
 
+    }
+
+    private fun applyScannerInsets() {
+        val bottomSheet = viewBinding.cardLayout
+        val initialLeft = bottomSheet.paddingLeft
+        val initialTop = bottomSheet.paddingTop
+        val initialRight = bottomSheet.paddingRight
+        val initialBottom = bottomSheet.paddingBottom
+
+        ViewCompat.setOnApplyWindowInsetsListener(viewBinding.root) { _, windowInsets ->
+            val safeInsets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+
+            // Keep the preview under the system bars, but place guidance and controls safely.
+            viewBinding.textOverLay.setPadding(
+                safeInsets.left,
+                safeInsets.top,
+                safeInsets.right,
+                safeInsets.bottom,
+            )
+            bottomSheet.setPadding(
+                initialLeft + safeInsets.left,
+                initialTop,
+                initialRight + safeInsets.right,
+                initialBottom + safeInsets.bottom,
+            )
+            windowInsets
+        }
+        ViewCompat.requestApplyInsets(viewBinding.root)
     }
 
     private fun initializeCamera() {

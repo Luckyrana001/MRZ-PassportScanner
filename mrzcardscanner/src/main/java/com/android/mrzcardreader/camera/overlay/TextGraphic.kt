@@ -34,9 +34,9 @@ class TextGraphic(
                 rect
             )
             val centerY = text.centerY()
-            return centerY in textOverlay.frameTop..textOverlay.frameBottom &&
-                text.right > textOverlay.frameLeft &&
-                text.left < textOverlay.frameRight
+            return centerY in textOverlay.mrzFrameTop..textOverlay.mrzFrameBottom &&
+                text.right > textOverlay.mrzFrameLeft &&
+                text.left < textOverlay.mrzFrameRight
 
         } ?: return false
 

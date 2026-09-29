@@ -24,6 +24,7 @@ class MrzReaderTest {
         assertEquals("KORIR", card.lastName)
         assertEquals("KYA", card.country)
         assertEquals("960926", card.dateOfBirth)
+        assertEquals("210630", card.dateOfExpiry)
     }
 
     @Test

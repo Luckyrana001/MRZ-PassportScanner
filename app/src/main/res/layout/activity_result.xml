@@ -3,6 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/page_background"
+    android:clipToPadding="false"
     android:fillViewport="true">
 
     <LinearLayout
@@ -103,6 +104,15 @@
             <TextView style="@style/ResultLabel" android:text="@string/date_of_birth_label" />
             <TextView android:id="@+id/dateOfBirthValue" style="@style/ResultValue" />
 
+            <TextView style="@style/ResultLabel" android:text="@string/date_of_expiry_label" />
+            <TextView android:id="@+id/dateOfExpiryValue" style="@style/ResultValue" />
+
+            <TextView
+                android:id="@+id/placeOfIssueLabel"
+                style="@style/ResultLabel"
+                android:text="@string/place_of_issue_label" />
+            <TextView android:id="@+id/placeOfIssueValue" style="@style/ResultValue" />
+
             <TextView style="@style/ResultLabel" android:text="@string/national_id_label" />
             <TextView android:id="@+id/nationalIdValue" style="@style/ResultValue" />
 
@@ -130,6 +140,66 @@
             android:contentDescription="@string/captured_mrz_image"
             android:padding="8dp"
             android:scaleType="fitCenter" />
+
+        <TextView
+            android:id="@+id/faceImageLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/captured_face_image"
+            android:textColor="@color/text_primary"
+            android:textSize="19sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/faceImage"
+            android:layout_width="150dp"
+            android:layout_height="190dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/result_image_background"
+            android:contentDescription="@string/captured_face_image"
+            android:padding="8dp"
+            android:scaleType="centerCrop" />
+
+        <TextView
+            android:id="@+id/faceImageStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/result_card_background"
+            android:gravity="center"
+            android:padding="18dp"
+            android:text="@string/preparing_face_image"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/shareImageButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:text="@string/share_scan_image"
+                android:textAllCaps="false" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/shareResultButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:text="@string/share_scan_result"
+                android:textAllCaps="false" />
+        </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"

@@ -13,4 +13,7 @@ data class IdData(
     var nationality:String,
     var rawMrz: String = "",
     var mrzImagePath: String = "",
+    var dateOfExpiry: String = "",
+    var faceImagePath: String = "",
+    var placeOfIssue: String = "",
 ):Serializable

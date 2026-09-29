@@ -8,9 +8,17 @@ import java.util.Locale
 object CardConnector {
     val mrzReader = MrzReader()
     private const val MAX_RECENT_LINES = 24
+    private const val MAX_RECENT_REFERENCE_LINES = 120
+    private const val MIN_LIVE_PASSPORT_OBSERVATIONS = 5
+    private const val MAX_CONSENSUS_OBSERVATIONS = 9
     private val recentLines = ArrayDeque<String>()
+    private val recentReferenceLines = ArrayDeque<String>()
 
-    fun onLinesCaptured(lines: List<String>, mrzResponse: MRZResponse) {
+    fun onLinesCaptured(
+        lines: List<String>,
+        mrzResponse: MRZResponse,
+        referenceLines: List<String> = lines,
+    ) {
         val passportLines = synchronized(recentLines) {
             lines.forEach { line ->
                 recentLines.addLast(line)
@@ -20,8 +28,19 @@ object CardConnector {
             }
             recentLines.toList()
         }
+        val passportReferenceLines = synchronized(recentReferenceLines) {
+            referenceLines.forEach { line -> recentReferenceLines.addLast(line) }
+            while (recentReferenceLines.size > MAX_RECENT_REFERENCE_LINES) {
+                recentReferenceLines.removeFirst()
+            }
+            recentReferenceLines.toList()
+        }
 
-        parsePassport(passportLines)?.let {
+        parsePassport(
+            passportLines,
+            MIN_LIVE_PASSPORT_OBSERVATIONS,
+            passportReferenceLines,
+        )?.let {
             clear()
             mrzResponse.cardResponse(it)
             return
@@ -40,15 +59,17 @@ object CardConnector {
             val readCard = mrzReader.readDocument(cardType, mrzString)
 
             val card = IdData(
-                readCard.firstName,
-                readCard.secondName,
-                readCard.lastName,
-                readCard.gender,
-                readCard.documentNumber,
-                readCard.dateOfBirth,
-                readCard.id,
-                readCard.country,
-                mrzString,
+                firstName = readCard.firstName,
+                middleName = readCard.secondName,
+                lastName = readCard.lastName,
+                gender = readCard.gender,
+                documentNo = readCard.documentNumber,
+                dateOfBirth = formatMrzDate(readCard.dateOfBirth),
+                idNo = readCard.id,
+                nationality = readCard.country,
+                rawMrz = mrzString,
+                dateOfExpiry = formatMrzDate(readCard.dateOfExpiry),
+                placeOfIssue = extractPlaceOfIssue(referenceLines),
             )
             mrzResponse.cardResponse(card)
         }
@@ -60,6 +81,9 @@ object CardConnector {
         synchronized(recentLines) {
             recentLines.clear()
         }
+        synchronized(recentReferenceLines) {
+            recentReferenceLines.clear()
+        }
     }
 
     private fun cleanMRZ(details_: String): String {
@@ -70,25 +94,30 @@ object CardConnector {
         return details
     }
 
-    fun parsePassport(lines: List<String>): IdData? {
+    fun parsePassport(lines: List<String>): IdData? = parsePassport(lines, 1, lines)
+
+    private fun parsePassport(
+        lines: List<String>,
+        minimumRowOneObservations: Int,
+        referenceLines: List<String>,
+    ): IdData? {
         val normalizedLines = lines.map(::normalizeMrzLine)
-        val firstLine = normalizedLines
+        val rowOneCandidates = normalizedLines
             .asSequence()
             .map(::normalizePassportFirstLine)
-            .firstOrNull { it.startsWith("P<") && it.length >= 30 }
+            .filter(::isPassportRowOneCandidate)
+            .map { it.padEnd(44, '<').take(44) }
+            .toList()
+        val rowOne = consensusPassportRowOne(rowOneCandidates, minimumRowOneObservations)
             ?: return null
 
-        val firstIndex = normalizedLines.indexOfFirst {
-            normalizePassportFirstLine(it) == firstLine
-        }
-        val secondLine = normalizedLines
-            .drop(firstIndex + 1)
-            .firstOrNull { it.length >= 40 && it.any(Char::isDigit) && it.contains("<") }
+        val rowTwo = normalizedLines
+            .asReversed()
+            .asSequence()
+            .filter { it.length >= 40 && it.any(Char::isDigit) }
+            .map(::normalizePassportRowTwo)
+            .firstOrNull(::isPassportRowTwo)
             ?: return null
-
-        val rowOne = firstLine.padEnd(44, '<').take(44)
-        val rowTwo = normalizePassportRowTwo(secondLine)
-        if (!isPassportRowTwo(rowTwo)) return null
 
         val nameArea = rowOne.substring(5)
         val doubleSeparator = nameArea.indexOf("<<")
@@ -108,20 +137,159 @@ object CardConnector {
         }
         if (lastName.isEmpty() || givenNames.isEmpty()) return null
 
-        val firstName = givenNames.first()
-        val middleName = givenNames.drop(1).joinToString(" ")
+        val issuingCountry = rowOne.substring(2, 5)
+        val parsedFirstName: String
+        val parsedMiddleName: String
+        if (issuingCountry == "SGP" && givenNames.size > 1) {
+            parsedFirstName = givenNames.last()
+            parsedMiddleName = givenNames.dropLast(1).joinToString(" ")
+        } else {
+            parsedFirstName = givenNames.first()
+            parsedMiddleName = givenNames.drop(1).joinToString(" ")
+        }
+        val firstName = correctTrailingFillerMisread(parsedFirstName, referenceLines)
+        val middleName = parsedMiddleName
+            .split(' ')
+            .joinToString(" ") { correctTrailingFillerMisread(it, referenceLines) }
+        val correctedLastName = correctTrailingFillerMisread(lastName, referenceLines)
 
         return IdData(
             firstName = firstName,
             middleName = middleName,
-            lastName = lastName,
-            gender = rowTwo[20].toString(),
+            lastName = correctedLastName,
+            gender = resolveGender(rowTwo[20], referenceLines),
             documentNo = rowTwo.substring(0, 9).trimEnd('<'),
             dateOfBirth = formatMrzDate(rowTwo.substring(13, 19)),
             idNo = rowTwo.substring(28, 43).trimEnd('<'),
-            nationality = rowTwo.substring(10, 13),
-            rawMrz = "$rowOne\n$rowTwo"
+            nationality = rowTwo.substring(10, 13).trimEnd('<'),
+            rawMrz = "$rowOne\n$rowTwo",
+            dateOfExpiry = formatMrzDate(rowTwo.substring(21, 27)),
+            placeOfIssue = extractPlaceOfIssue(referenceLines),
         )
+    }
+
+    private fun extractPlaceOfIssue(lines: List<String>): String {
+        val labelPattern = Regex(
+            "(?:PLACE\\s+OF\\s+ISSUE|PLACE\\s+OF\\s+ISSUANCE|ISSUING\\s+PLACE)\\s*[:/-]?\\s*(.*)$",
+            RegexOption.IGNORE_CASE,
+        )
+        val cleanedLines = lines.map { line -> line.trim().replace(Regex("\\s+"), " ") }
+
+        cleanedLines.forEachIndexed { index, line ->
+            val labelMatch = labelPattern.find(line) ?: return@forEachIndexed
+            cleanPlaceOfIssueCandidate(labelMatch.groupValues[1])?.let { return it }
+
+            for (candidateIndex in (index + 1)..minOf(index + 3, cleanedLines.lastIndex)) {
+                cleanPlaceOfIssueCandidate(cleanedLines[candidateIndex])?.let { return it }
+            }
+        }
+        return ""
+    }
+
+    private fun cleanPlaceOfIssueCandidate(value: String): String? {
+        val candidate = value
+            .trim(' ', ':', '-', '/', '|')
+            .replace(Regex("\\s+"), " ")
+        if (candidate.length !in 2..48 || candidate.contains('<')) return null
+        if (candidate.any(Char::isDigit)) return null
+        if (candidate.count(Char::isLetter) < 2) return null
+
+        val uppercaseCandidate = candidate.uppercase(Locale.US)
+        val labelWords = listOf(
+            "PLACE OF ISSUE",
+            "PLACE OF ISSUANCE",
+            "ISSUING PLACE",
+            "DATE OF ISSUE",
+            "DATE OF EXPIRY",
+            "DATE OF BIRTH",
+            "PASSPORT",
+            "NATIONALITY",
+            "AUTHORITY",
+            "GENDER",
+            "SEX",
+        )
+        if (labelWords.any(uppercaseCandidate::contains)) return null
+        return candidate
+    }
+
+    private fun correctTrailingFillerMisread(
+        name: String,
+        referenceLines: List<String>,
+    ): String {
+        if (!name.endsWith('K')) return name
+        for (suffixLength in 2 downTo 1) {
+            if (name.length <= suffixLength || !name.endsWith("K".repeat(suffixLength))) continue
+            val candidate = name.dropLast(suffixLength)
+            if (hasPrintedNameEvidence(candidate, referenceLines)) return candidate
+        }
+        return name
+    }
+
+    private fun hasPrintedNameEvidence(name: String, lines: List<String>): Boolean = lines.any { line ->
+        if (line.contains('<') || line.contains('«')) return@any false
+        val words = line.uppercase(Locale.US)
+            .replace(Regex("[^A-Z]+"), " ")
+            .trim()
+            .split(Regex("\\s+"))
+        name in words || words.joinToString("").endsWith(name)
+    }
+
+    private fun resolveGender(mrzGender: Char, referenceLines: List<String>): String {
+        if (mrzGender == 'M' || mrzGender == 'F' || mrzGender == 'X') {
+            return mrzGender.toString()
+        }
+
+        val normalizedLines = referenceLines.map { line ->
+            line.uppercase(Locale.US)
+                .replace(Regex("[^A-Z]+"), " ")
+                .trim()
+        }
+        normalizedLines.forEach { line ->
+            val words = line.split(Regex("\\s+")).filter(String::isNotEmpty)
+            val hasGenderLabel = words.any { word ->
+                word == "SEX" || word == "GENDER" || word == "KYN"
+            }
+            if (hasGenderLabel) {
+                words.lastOrNull { it == "M" || it == "F" || it == "X" }?.let { return it }
+            }
+        }
+        return normalizedLines.firstOrNull { it == "M" || it == "F" || it == "X" }.orEmpty()
+    }
+
+    private fun isPassportRowOneCandidate(row: String): Boolean =
+        row.length >= 30 &&
+            row.startsWith("P<") &&
+            row.substring(2, 5).all { it.isLetter() || it == '<' } &&
+            row.substring(2, 5).any(Char::isLetter) &&
+            row.count { it == '<' } >= 2
+
+    private fun consensusPassportRowOne(
+        candidates: List<String>,
+        minimumObservations: Int,
+    ): String? {
+        val compatibleCandidates = candidates
+            .takeLast(MAX_CONSENSUS_OBSERVATIONS)
+            .groupBy { it.take(5) }
+            .values
+            .maxByOrNull(List<String>::size)
+            .orEmpty()
+        if (compatibleCandidates.size < minimumObservations) return null
+        if (compatibleCandidates.size == 1) return compatibleCandidates.first()
+
+        return buildString(44) {
+            repeat(44) { index ->
+                val votes = compatibleCandidates.groupingBy { it[index] }.eachCount()
+                val mostVotes = votes.maxOf { it.value }
+                val winners = votes.filterValues { it == mostVotes }.keys
+                append(
+                    when {
+                        '<' in winners -> '<'
+                        else -> compatibleCandidates.asReversed()
+                            .first { it[index] in winners }[index]
+                    }
+                )
+            }
+        }
     }
 
     private fun normalizeMrzLine(value: String): String = value
@@ -160,53 +328,7 @@ object CardConnector {
                 else -> row[index]
             }
         }
-        correctDocumentNumber(row)
         return String(row)
-    }
-
-    private fun correctDocumentNumber(row: CharArray) {
-        val field = String(row, 0, 9)
-        val expectedCheckDigit = row[9]
-        val corrected = ambiguousVariants(field)
-            .filter { candidate -> checkDigit(candidate) == expectedCheckDigit }
-            .maxByOrNull { candidate -> candidate.count(Char::isDigit) }
-            ?: return
-        corrected.forEachIndexed { index, character -> row[index] = character }
-    }
-
-    private fun ambiguousVariants(value: String): Sequence<String> = sequence {
-        val variants = ArrayList<String>()
-
-        fun build(index: Int, current: StringBuilder) {
-            if (index == value.length) {
-                variants.add(current.toString())
-                return
-            }
-            val character = value[index]
-            val alternatives = when (character) {
-                'O' -> charArrayOf('O', '0')
-                '0' -> charArrayOf('0', 'O')
-                'I', 'L' -> charArrayOf(character, '1')
-                '1' -> charArrayOf('1', 'I')
-                'Z' -> charArrayOf('Z', '2')
-                '2' -> charArrayOf('2', 'Z')
-                'S' -> charArrayOf('S', '5')
-                '5' -> charArrayOf('5', 'S')
-                'B' -> charArrayOf('B', '8')
-                '8' -> charArrayOf('8', 'B')
-                'G' -> charArrayOf('G', '6')
-                '6' -> charArrayOf('6', 'G')
-                else -> charArrayOf(character)
-            }
-            alternatives.forEach { alternative ->
-                current.append(alternative)
-                build(index + 1, current)
-                current.deleteCharAt(current.lastIndex)
-            }
-        }
-
-        build(0, StringBuilder())
-        yieldAll(variants)
     }
 
     private fun checkDigit(value: String): Char {
@@ -223,13 +345,19 @@ object CardConnector {
     }
 
     private fun isPassportRowTwo(row: String): Boolean {
-        if (!row.matches(Regex("[A-Z0-9<]{9}[0-9][A-Z]{3}[0-9]{6}[0-9][MF<][0-9]{6}[0-9][A-Z0-9<]{15}[0-9]"))) {
+        if (!row.matches(Regex("[A-Z0-9<]{9}[0-9][A-Z<]{3}[0-9]{6}[0-9][MF<][0-9]{6}[0-9][A-Z0-9<]{15}[0-9]"))) {
             return false
         }
-        return true
+        val validPrimaryCheckDigits = listOf(
+            checkDigit(row.substring(0, 9)) == row[9],
+            checkDigit(row.substring(13, 19)) == row[19],
+            checkDigit(row.substring(21, 27)) == row[27],
+        ).count { it }
+        return validPrimaryCheckDigits >= 1
     }
 
     private fun formatMrzDate(value: String): String {
+        if (!value.matches(Regex("[0-9]{6}"))) return value
         val year = value.substring(0, 2).toInt()
         val fullYear = if (year >= 50) 1900 + year else 2000 + year
         return "%02d/%02d/%04d".format(

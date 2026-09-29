@@ -9,4 +9,5 @@ class Card(
     var id: String,
     var country: String,
     var dateOfBirth: String,
+    var dateOfExpiry: String = "",
 )

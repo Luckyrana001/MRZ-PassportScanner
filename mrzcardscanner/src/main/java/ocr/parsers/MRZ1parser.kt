@@ -115,6 +115,7 @@ class MRZ1parser {
             getID(rowTwo),
             getCountry(rowOne),
             getDateOfBirth(rowTwo),
+            getDateOfIssue(rowTwo),
         ).also { clear() }
     }
 

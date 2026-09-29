@@ -13,4 +13,5 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#61000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="launcher_icon_background">#061D69</color>
 </resources>

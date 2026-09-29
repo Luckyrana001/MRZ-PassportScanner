@@ -80,6 +80,7 @@ class ImageAnalyzer(
                     }
                     val validLineGraphics = lineGraphics.filter { it.second.isInsideFrame() }
                     val validLines = validLineGraphics.map { it.first.text }
+                    val recognizedLines = lineGraphics.map { it.first.text }
                     val textGraphics = validLineGraphics
                         .filter { isMrzLine(it.first.text) }
                         .map { it.second }
@@ -87,7 +88,7 @@ class ImageAnalyzer(
 
                     try {
                         if (scannerRunning && validLines.isNotEmpty()) {
-                            CardConnector.onLinesCaptured(validLines, this)
+                            CardConnector.onLinesCaptured(validLines, this, recognizedLines)
 
                         } else if (!scannerRunning) {
                             CardConnector.clear()
@@ -136,14 +137,16 @@ class ImageAnalyzer(
     override fun cardResponse(card: IdData) {
         scannerRunning = false
         Handler(Looper.getMainLooper()).post {
-            card.mrzImagePath = saveMrzImage()
+            val capturedImages = savePassportImages()
+            card.mrzImagePath = capturedImages.first
+            card.faceImagePath = capturedImages.second
             cardResult.cardDetails(card)
         }
     }
 
-    private fun saveMrzImage(): String {
-        val previewBitmap = activityMainBinding.viewFinder.bitmap ?: return ""
-        if (textOverlay.width == 0 || textOverlay.height == 0) return ""
+    private fun savePassportImages(): Pair<String, String> {
+        val previewBitmap = activityMainBinding.viewFinder.bitmap ?: return "" to ""
+        if (textOverlay.width == 0 || textOverlay.height == 0) return "" to ""
 
         val scaleX = previewBitmap.width.toFloat() / textOverlay.width
         val scaleY = previewBitmap.height.toFloat() / textOverlay.height
@@ -158,12 +161,31 @@ class ImageAnalyzer(
             right - left,
             bottom - top
         )
-        val outputFile = File(textOverlay.context.cacheDir, "mrz_${System.currentTimeMillis()}.jpg")
+        val timestamp = System.currentTimeMillis()
+        val outputFile = File(textOverlay.context.cacheDir, "passport_$timestamp.jpg")
         FileOutputStream(outputFile).use { output ->
             croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
         }
+
+        // ICAO passport data pages reserve the left portion above the MRZ for the portrait.
+        val faceLeft = (croppedBitmap.width * 0.04f).toInt()
+        val faceTop = (croppedBitmap.height * 0.12f).toInt()
+        val faceRight = (croppedBitmap.width * 0.36f).toInt()
+        val faceBottom = (croppedBitmap.height * 0.72f).toInt()
+        val faceBitmap = Bitmap.createBitmap(
+            croppedBitmap,
+            faceLeft,
+            faceTop,
+            faceRight - faceLeft,
+            faceBottom - faceTop,
+        )
+        val faceFile = File(textOverlay.context.cacheDir, "passport_face_$timestamp.jpg")
+        FileOutputStream(faceFile).use { output ->
+            faceBitmap.compress(Bitmap.CompressFormat.JPEG, 94, output)
+        }
+        faceBitmap.recycle()
         if (croppedBitmap !== previewBitmap) croppedBitmap.recycle()
-        return outputFile.absolutePath
+        return outputFile.absolutePath to faceFile.absolutePath
     }
 
     private fun updateCardDetails(idData: IdData) {
