@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">MRZCardReader</string>
+    <string name="confirm">Confirm</string>
+    <string name="doc_no">Doc No:</string>
+    <string name="id">ID:</string>
+    <string name="dob">DOB:</string>
+    <string name="gender">Gender:</string>
+    <string name="last_name">Last Name:</string>
+    <string name="middle_name">Middle Name:</string>
+    <string name="first_name">First Name:</string>
+    <string name="rescan">Rescan</string>
+    <string name="scan_complete">Scan complete</string>
+    <string name="scanned_passport">Scanned passport</string>
+    <string name="scanned_item">SCANNED ITEM</string>
+    <string name="document_details">Document details</string>
+    <string name="document_type_label">Document type</string>
+    <string name="first_name_label">First name</string>
+    <string name="middle_name_label">Middle name</string>
+    <string name="last_name_label">Last name</string>
+    <string name="gender_label">Gender</string>
+    <string name="document_number_label">Passport number</string>
+    <string name="date_of_birth_label">Date of birth</string>
+    <string name="national_id_label">National ID number</string>
+    <string name="nationality_label">Nationality</string>
+    <string name="full_mrz">Full MRZ</string>
+    <string name="mrz_hint">Parsed machine-readable zone</string>
+    <string name="mrz_unavailable">MRZ unavailable</string>
+    <string name="captured_mrz_image">Captured MRZ image</string>
+    <string name="scan_another_passport">Scan another passport</string>
+</resources>
